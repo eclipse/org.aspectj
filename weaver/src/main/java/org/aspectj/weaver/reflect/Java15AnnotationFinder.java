@@ -1,10 +1,10 @@
 /* *******************************************************************
  * Copyright (c) 2005, 2017 Contributors.
- * All rights reserved. 
- * This program and the accompanying materials are made available 
- * under the terms of the Eclipse Public License v1.0 
- * which accompanies this distribution and is available at 
- * http://eclipse.org/legal/epl-v10.html 
+ * All rights reserved.
+ * This program and the accompanying materials are made available
+ * under the terms of the Eclipse Public License v1.0
+ * which accompanies this distribution and is available at
+ * http://eclipse.org/legal/epl-v10.html
  * ******************************************************************/
 package org.aspectj.weaver.reflect;
 
@@ -31,7 +31,7 @@ import org.aspectj.weaver.bcel.BcelAnnotation;
 import org.aspectj.weaver.bcel.BcelWeakClassLoaderReference;
 
 /**
- * 
+ *
  * @author Adrian Colyer
  * @author Andy Clement
  */
@@ -41,9 +41,17 @@ public class Java15AnnotationFinder implements AnnotationFinder, ArgNameFinder {
 
 	private Repository bcelRepository;
 	private BcelWeakClassLoaderReference classLoaderRef;
+
+	private static Repository staticBcelRepository;
+	private static BcelWeakClassLoaderReference staticClassLoaderRef;
+
 	private World world;
 	private static boolean useCachingClassLoaderRepository;
-	
+
+	//Use single instance of Repository and ClassLoader
+	public static final boolean useSingleInstances =
+		System.getProperty("org.aspectj.apache.bcel.useSingleRepositoryInstance", "false").equalsIgnoreCase("true");
+
 	static {
 		try {
 			useCachingClassLoaderRepository = System.getProperty("Xset:bcelRepositoryCaching","true").equalsIgnoreCase("true");
@@ -57,12 +65,29 @@ public class Java15AnnotationFinder implements AnnotationFinder, ArgNameFinder {
 	}
 
 	public void setClassLoader(ClassLoader aLoader) {
-		this.classLoaderRef = new BcelWeakClassLoaderReference(aLoader);
+		//Set class loader ref
+		if (useSingleInstances && staticClassLoaderRef == null)
+			staticClassLoaderRef = new BcelWeakClassLoaderReference(aLoader);
+		else
+			this.classLoaderRef = new BcelWeakClassLoaderReference(aLoader);
+
+		//Set repository
 		if (useCachingClassLoaderRepository) {
-			this.bcelRepository = new ClassLoaderRepository(classLoaderRef);
-		} else {
-			this.bcelRepository = new NonCachingClassLoaderRepository(classLoaderRef);
+			if (useSingleInstances && staticBcelRepository == null)
+				staticBcelRepository = new ClassLoaderRepository(getClassLoader());
+			else
+				this.bcelRepository = new ClassLoaderRepository(classLoaderRef);
 		}
+		else {
+			if (useSingleInstances && staticBcelRepository == null)
+				staticBcelRepository = new NonCachingClassLoaderRepository(getClassLoader());
+			else
+				this.bcelRepository = new NonCachingClassLoaderRepository(classLoaderRef);
+		}
+	}
+
+	private Repository getBcelRepository() {
+		return useSingleInstances ? staticBcelRepository : bcelRepository;
 	}
 
 	public void setWorld(World aWorld) {
@@ -111,7 +136,7 @@ public class Java15AnnotationFinder implements AnnotationFinder, ArgNameFinder {
 	}
 
 	private ClassLoader getClassLoader() {
-		return classLoaderRef.getClassLoader();
+		return useSingleInstances ? staticClassLoaderRef.getClassLoader() : classLoaderRef.getClassLoader();
 	}
 
 	public AnnotationAJ getAnnotationOfType(UnresolvedType ofType, Member onMember) {
@@ -144,7 +169,7 @@ public class Java15AnnotationFinder implements AnnotationFinder, ArgNameFinder {
 				anns = bcelField.getAnnotations();
 			}
 			// the answer is cached and we don't want to hold on to memory
-			bcelRepository.clear();
+			getBcelRepository().clear();
 			// OPTIMIZE make constant 0 size array for sharing
 			if (anns == null)
 				anns = new org.aspectj.apache.bcel.classfile.annotation.AnnotationGen[0];
@@ -163,7 +188,7 @@ public class Java15AnnotationFinder implements AnnotationFinder, ArgNameFinder {
 
 	public String getAnnotationDefaultValue(Member onMember) {
 		try {
-			JavaClass jc = bcelRepository.loadClass(onMember.getDeclaringClass());
+			JavaClass jc = getBcelRepository().loadClass(onMember.getDeclaringClass());
 			if (onMember instanceof Method) {
 				org.aspectj.apache.bcel.classfile.Method bcelMethod = jc.getMethod((Method) onMember);
 
@@ -199,7 +224,7 @@ public class Java15AnnotationFinder implements AnnotationFinder, ArgNameFinder {
 		// we can just use reflection.
 		if (!areRuntimeAnnotationsSufficient) {
 			try {
-				JavaClass jc = bcelRepository.loadClass(onMember.getDeclaringClass());
+				JavaClass jc = getBcelRepository().loadClass(onMember.getDeclaringClass());
 				org.aspectj.apache.bcel.classfile.annotation.AnnotationGen[] anns = null;
 				if (onMember instanceof Method) {
 					org.aspectj.apache.bcel.classfile.Method bcelMethod = jc.getMethod((Method) onMember);
@@ -214,7 +239,7 @@ public class Java15AnnotationFinder implements AnnotationFinder, ArgNameFinder {
 					anns = bcelField.getAnnotations();
 				}
 				// the answer is cached and we don't want to hold on to memory
-				bcelRepository.clear();
+				getBcelRepository().clear();
 				if (anns == null || anns.length == 0) {
 					return ResolvedType.NONE;
 				}
@@ -245,9 +270,9 @@ public class Java15AnnotationFinder implements AnnotationFinder, ArgNameFinder {
 		// annotations so we bail out to Bcel and then chuck away the JavaClass so that we
 		// don't hog memory.
 		try {
-			JavaClass jc = bcelRepository.loadClass(forClass);
+			JavaClass jc = getBcelRepository().loadClass(forClass);
 			org.aspectj.apache.bcel.classfile.annotation.AnnotationGen[] anns = jc.getAnnotations();
-			bcelRepository.clear();
+			getBcelRepository().clear();
 			if (anns == null) {
 				return ResolvedType.NONE;
 			} else {
@@ -275,7 +300,7 @@ public class Java15AnnotationFinder implements AnnotationFinder, ArgNameFinder {
 			return null;
 
 		try {
-			JavaClass jc = bcelRepository.loadClass(forMember.getDeclaringClass());
+			JavaClass jc = getBcelRepository().loadClass(forMember.getDeclaringClass());
 			LocalVariableTable lvt = null;
 			int numVars = 0;
 			if (forMember instanceof Method) {
@@ -319,7 +344,7 @@ public class Java15AnnotationFinder implements AnnotationFinder, ArgNameFinder {
 		// don't hog
 		// memory.
 		try {
-			JavaClass jc = bcelRepository.loadClass(onMember.getDeclaringClass());
+			JavaClass jc = getBcelRepository().loadClass(onMember.getDeclaringClass());
 			org.aspectj.apache.bcel.classfile.annotation.AnnotationGen[][] anns = null;
 			if (onMember instanceof Method) {
 				org.aspectj.apache.bcel.classfile.Method bcelMethod = jc.getMethod((Method) onMember);
@@ -339,7 +364,7 @@ public class Java15AnnotationFinder implements AnnotationFinder, ArgNameFinder {
 				// anns = null;
 			}
 			// the answer is cached and we don't want to hold on to memory
-			bcelRepository.clear();
+			getBcelRepository().clear();
 			if (anns == null)
 				return NO_PARAMETER_ANNOTATIONS;
 			ResolvedType[][] result = new ResolvedType[anns.length][];
